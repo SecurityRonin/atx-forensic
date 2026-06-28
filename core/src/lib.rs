@@ -59,6 +59,17 @@ use thiserror::Error;
 /// `\r\n\x1a\n` guard). Confirmed from the iLEAPP reference (`AAPL_MAGIC`).
 pub const MAGIC: &[u8; 8] = b"AAPL\r\n\x1a\n";
 
+/// Bytes per ASTC block (all block footprints are 128-bit).
+const ASTC_BLOCK_BYTES: usize = 16;
+/// ASTC 4x4 block width in pixels.
+const ASTC_BLOCK_WIDTH: u32 = 4;
+/// ASTC 4x4 block height in pixels.
+const ASTC_BLOCK_HEIGHT: u32 = 4;
+/// Macro-tile edge in ASTC blocks (the de-tiling tile is 32x32 blocks).
+const MACRO_BLOCKS: u32 = 32;
+/// Macro-tile edge in pixels (32 blocks x 4 px = 128) — also the grid-seam step.
+const MACRO_TILE_PX: u32 = MACRO_BLOCKS * ASTC_BLOCK_WIDTH;
+
 /// Errors from reading or decoding an ATX container.
 ///
 /// Bad magic is a *bootstrap* failure (the buffer is not an ATX container at all)
@@ -105,6 +116,9 @@ pub enum AtxError {
     /// LZFSE decompression of an `LZFS` payload failed.
     #[error("LZFSE decompression failed: {0}")]
     Decompress(String),
+    /// The ASTC decoder failed to consume the (de-tiled) block stream.
+    #[error("ASTC decode failed: {0}")]
+    AstcDecode(String),
 }
 
 /// The chunk FourCC tags ATX containers carry.
@@ -216,8 +230,129 @@ pub struct Atx {
 /// Parse an ATX container: validate the magic (loud on failure), walk the framed
 /// chunk list, and parse HEAD + locate the texture payload. Malformed chunks
 /// after a valid magic degrade to [`Atx::warnings`].
-pub fn parse(_bytes: &[u8]) -> Result<Atx, AtxError> {
-    unimplemented!("RED: framed walk pending")
+pub fn parse(bytes: &[u8]) -> Result<Atx, AtxError> {
+    if !is_atx(bytes) {
+        return Err(AtxError::NotAtx {
+            found: bytes.get(..MAGIC.len()).unwrap_or(bytes).to_vec(),
+        });
+    }
+    let mut warnings = Vec::new();
+    let chunks = walk_chunks(bytes, &mut warnings);
+    let head = parse_head(bytes, &chunks, &mut warnings);
+    let payload = parse_payload(bytes, &chunks, &mut warnings);
+    Ok(Atx {
+        chunks,
+        head,
+        payload,
+        warnings,
+    })
+}
+
+/// Read a little-endian `u32` at `off`, bounds-checked (no panic on truncation).
+fn u32_le(bytes: &[u8], off: usize) -> Option<u32> {
+    bytes
+        .get(off..off + 4)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+}
+
+/// Whether a tag is one of the texture payload chunks.
+fn is_payload_tag(tag: [u8; 4]) -> bool {
+    &tag == fourcc::ASTC_LOWER || &tag == fourcc::ASTC_UPPER || &tag == fourcc::LZFS
+}
+
+/// Walk the framed `[size u32 LE][tag][payload]` chunk list from after the magic.
+/// Stops (with a warning) at the first chunk that would extend past EOF.
+fn walk_chunks(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<ChunkRef> {
+    let mut out = Vec::new();
+    let mut offset = MAGIC.len();
+    while offset + 8 <= bytes.len() {
+        let Some(size) = u32_le(bytes, offset) else {
+            break; // cov:unreachable: offset+8 <= len keeps the u32 in range
+        };
+        let Some(tag_slice) = bytes.get(offset + 4..offset + 8) else {
+            break; // cov:unreachable: offset+8 <= len keeps the tag in range
+        };
+        let Ok(tag) = <[u8; 4]>::try_from(tag_slice) else {
+            break; // cov:unreachable: slice is exactly 4 bytes
+        };
+        let payload_offset = offset + 8;
+        let end = payload_offset + size as usize;
+        if end > bytes.len() {
+            warnings.push(format!(
+                "Chunk {} at offset {offset} extends beyond EOF",
+                String::from_utf8_lossy(&tag)
+            ));
+            return out;
+        }
+        out.push(ChunkRef {
+            tag,
+            offset,
+            size,
+            payload_offset,
+        });
+        offset = end;
+    }
+    if offset != bytes.len() {
+        warnings.push(format!(
+            "{} trailing byte(s) after last complete chunk",
+            bytes.len() - offset
+        ));
+    }
+    out
+}
+
+/// Parse the `HEAD` chunk's fields at the documented offsets. Degrades to a
+/// warning (returning `None`) if HEAD is absent or too small.
+fn parse_head(bytes: &[u8], chunks: &[ChunkRef], warnings: &mut Vec<String>) -> Option<Head> {
+    let Some(head) = chunks.iter().find(|c| &c.tag == fourcc::HEAD) else {
+        warnings.push("No HEAD chunk found".to_string());
+        return None;
+    };
+    if (head.size as usize) < 0x54 {
+        warnings.push(format!(
+            "HEAD chunk too small for documented ATX header: {} bytes",
+            head.size
+        ));
+        return None;
+    }
+    let p = bytes.get(head.payload_offset..head.payload_offset + head.size as usize)?;
+    let texture_uuid: [u8; 16] = p.get(0x3C..0x4C)?.try_into().ok()?;
+    Some(Head {
+        flags: u32_le(p, 0x00)?,
+        width: u32_le(p, 0x18)?,
+        height: u32_le(p, 0x1C)?,
+        depth: u32_le(p, 0x20)?,
+        array_layers: u32_le(p, 0x28)?,
+        mipmaps: u32_le(p, 0x2C)?,
+        texture_uuid,
+        pixel_format: (u32_le(p, 0x4C)?, u32_le(p, 0x50)?),
+    })
+}
+
+/// Locate the first texture payload chunk and read its inner `[declared_size][data]`
+/// framing. Degrades to a warning (returning `None`) if absent or too small.
+fn parse_payload(bytes: &[u8], chunks: &[ChunkRef], warnings: &mut Vec<String>) -> Option<Payload> {
+    let Some(chunk) = chunks.iter().find(|c| is_payload_tag(c.tag)) else {
+        warnings.push("No astc, ASTC, or LZFS texture payload chunk found".to_string());
+        return None;
+    };
+    if chunk.size < 4 {
+        warnings.push(format!(
+            "{} chunk too small to include an inner size",
+            String::from_utf8_lossy(&chunk.tag)
+        ));
+        return None;
+    }
+    let declared_size = u32_le(bytes, chunk.payload_offset)?;
+    Some(Payload {
+        tag: chunk.tag,
+        declared_size,
+        data_offset: chunk.payload_offset + 4,
+        data_len: chunk.size as usize - 4,
+        compressed: &chunk.tag == fourcc::LZFS,
+    })
 }
 
 /// A decoded ATX image (RGBA8).
@@ -238,15 +373,220 @@ pub struct DecodedImage {
 /// NOTE (Doer-Checker): this wires validated codecs (`lzfse_rust`, `astc-decode`)
 /// and the clean-room framing/de-tile, but the end-to-end result is **not yet
 /// pixel-validated against a real device sample + the iLEAPP oracle** (HANDOFF §5).
-pub fn decode(_bytes: &[u8]) -> Result<DecodedImage, AtxError> {
-    unimplemented!("RED: decode pipeline pending")
+pub fn decode(bytes: &[u8]) -> Result<DecodedImage, AtxError> {
+    let atx = parse(bytes)?;
+    let head = atx.head.ok_or(AtxError::NoHead)?;
+    let payload = atx.payload.ok_or(AtxError::NoPayload)?;
+
+    if head.width == 0 || head.height == 0 {
+        return Err(AtxError::InvalidDimensions {
+            width: head.width,
+            height: head.height,
+        });
+    }
+    let confidence =
+        astc4x4_confidence(head.pixel_format).ok_or(AtxError::UnsupportedPixelFormat {
+            pixel_format: head.pixel_format,
+        })?;
+
+    let data = bytes
+        .get(payload.data_offset..payload.data_offset + payload.data_len)
+        .ok_or_else(|| AtxError::Decompress("payload slice out of bounds".to_string()))?;
+
+    let rgba = if payload.compressed {
+        decode_lzfs(data, head.width, head.height)?
+    } else {
+        decode_macro_tiled(data, head.width, head.height)?
+    };
+
+    Ok(DecodedImage {
+        width: head.width,
+        height: head.height,
+        rgba,
+        confidence,
+    })
+}
+
+/// Round `value` up to the next multiple of `multiple`.
+fn round_up(value: u32, multiple: u32) -> u32 {
+    value.div_ceil(multiple) * multiple
+}
+
+/// Bytes a padded `width` x `height` ASTC 4x4 texture occupies.
+fn astc_byte_count(width: u32, height: u32) -> usize {
+    let blocks_w = round_up(width, ASTC_BLOCK_WIDTH) / ASTC_BLOCK_WIDTH;
+    let blocks_h = round_up(height, ASTC_BLOCK_HEIGHT) / ASTC_BLOCK_HEIGHT;
+    blocks_w as usize * blocks_h as usize * ASTC_BLOCK_BYTES
+}
+
+/// `LZFS` path: LZFSE-decompress to a *linear* ASTC 4x4 stream, decode, crop.
+fn decode_lzfs(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AtxError> {
+    let mut astc = Vec::new();
+    lzfse_rust::decode_bytes(data, &mut astc).map_err(|e| AtxError::Decompress(e.to_string()))?;
+    let padded_w = round_up(width, ASTC_BLOCK_WIDTH);
+    let padded_h = round_up(height, ASTC_BLOCK_HEIGHT);
+    let expected = astc_byte_count(padded_w, padded_h);
+    let astc = astc.get(..expected).ok_or(AtxError::PayloadTooSmall {
+        got: astc.len(),
+        expected,
+    })?;
+    let rgba = astc_to_rgba(astc, padded_w, padded_h)?;
+    Ok(crop_rgba(&rgba, padded_w, padded_h, width, height))
+}
+
+/// Raw `astc`/`ASTC` path: the blocks are macro-tiled (32x32-block, Morton order).
+/// The X/Y interpretation is unflagged, so decode both orientations and keep the
+/// one with the smaller brightness jump across the 128-px macro-tile seams.
+fn decode_macro_tiled(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AtxError> {
+    let padded_w = round_up(width, MACRO_TILE_PX);
+    let padded_h = round_up(height, MACRO_TILE_PX);
+    let blocks_w = padded_w / ASTC_BLOCK_WIDTH;
+    let blocks_h = padded_h / ASTC_BLOCK_HEIGHT;
+    let expected = blocks_w as usize * blocks_h as usize * ASTC_BLOCK_BYTES;
+    if data.len() < expected {
+        return Err(AtxError::PayloadTooSmall {
+            got: data.len(),
+            expected,
+        });
+    }
+
+    let mut best: Option<(f64, Vec<u8>)> = None;
+    for swap_xy in [false, true] {
+        let linear = detile_blocks(data, blocks_w, blocks_h, swap_xy);
+        let padded_rgba = astc_to_rgba(&linear, padded_w, padded_h)?;
+        let cropped = crop_rgba(&padded_rgba, padded_w, padded_h, width, height);
+        let score = grid_seam_score(&cropped, width, height);
+        let replace = match &best {
+            Some((best_score, _)) => score < *best_score,
+            None => true,
+        };
+        if replace {
+            best = Some((score, cropped));
+        }
+    }
+    best.map(|(_, rgba)| rgba)
+        .ok_or_else(|| AtxError::AstcDecode("no de-tile candidate produced".to_string()))
+}
+
+/// Scatter macro-tiled, Morton-ordered ASTC blocks into linear raster block order.
+fn detile_blocks(src: &[u8], blocks_w: u32, blocks_h: u32, swap_xy: bool) -> Vec<u8> {
+    let mut linear = vec![0u8; blocks_w as usize * blocks_h as usize * ASTC_BLOCK_BYTES];
+    let mut src_off = 0usize;
+    let mut macro_y = 0;
+    while macro_y < blocks_h {
+        let mut macro_x = 0;
+        while macro_x < blocks_w {
+            for morton in 0..MACRO_BLOCKS * MACRO_BLOCKS {
+                let (mut local_x, mut local_y) = morton_5bit(morton);
+                if swap_xy {
+                    core::mem::swap(&mut local_x, &mut local_y);
+                }
+                let block_x = macro_x + local_x;
+                let block_y = macro_y + local_y;
+                let dst = (block_y * blocks_w + block_x) as usize * ASTC_BLOCK_BYTES;
+                if let (Some(d), Some(s)) = (
+                    linear.get_mut(dst..dst + ASTC_BLOCK_BYTES),
+                    src.get(src_off..src_off + ASTC_BLOCK_BYTES),
+                ) {
+                    d.copy_from_slice(s);
+                }
+                src_off += ASTC_BLOCK_BYTES;
+            }
+            macro_x += MACRO_BLOCKS;
+        }
+        macro_y += MACRO_BLOCKS;
+    }
+    linear
+}
+
+/// Decode a linear ASTC 4x4 block stream to an RGBA8 buffer of `width` x `height`.
+fn astc_to_rgba(astc: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AtxError> {
+    let row = width as usize;
+    let mut rgba = vec![0u8; row * height as usize * 4];
+    astc_decode::astc_decode(
+        astc,
+        width,
+        height,
+        astc_decode::Footprint::ASTC_4X4,
+        |x, y, color| {
+            let idx = (y as usize * row + x as usize) * 4;
+            if let Some(px) = rgba.get_mut(idx..idx + 4) {
+                px.copy_from_slice(&color);
+            }
+        },
+    )
+    .map_err(|e| AtxError::AstcDecode(e.to_string()))?;
+    Ok(rgba)
+}
+
+/// Crop the top-left `dst_w` x `dst_h` region out of a `src_w`-wide RGBA8 buffer.
+fn crop_rgba(src: &[u8], src_w: u32, _src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    let (sw, dw, dh) = (src_w as usize, dst_w as usize, dst_h as usize);
+    let mut out = vec![0u8; dw * dh * 4];
+    for y in 0..dh {
+        let src_row = y * sw * 4;
+        let dst_row = y * dw * 4;
+        if let (Some(s), Some(d)) = (
+            src.get(src_row..src_row + dw * 4),
+            out.get_mut(dst_row..dst_row + dw * 4),
+        ) {
+            d.copy_from_slice(s);
+        }
+    }
+    out
+}
+
+/// Mean absolute luma step across the 128-px macro-tile seams of an RGBA8 image.
+/// Lower means smoother seams — the reference's tie-breaker between the two
+/// Morton X/Y orientations. Luma uses the ITU-R 601-2 weights PIL's "L" mode uses.
+fn grid_seam_score(rgba: &[u8], width: u32, height: u32) -> f64 {
+    let (w, h) = (width as usize, height as usize);
+    let luma = |x: usize, y: usize| -> i32 {
+        let i = (y * w + x) * 4;
+        match rgba.get(i..i + 3) {
+            Some(p) => {
+                (i32::from(p[0]) * 299 + i32::from(p[1]) * 587 + i32::from(p[2]) * 114) / 1000
+            }
+            None => 0,
+        }
+    };
+    let step = MACRO_TILE_PX as usize;
+    let mut total = 0.0f64;
+    let mut count = 0u32;
+    let mut x = step;
+    while x < w {
+        for y in 0..h {
+            total += f64::from((luma(x, y) - luma(x - 1, y)).unsigned_abs());
+            count += 1;
+        }
+        x += step;
+    }
+    let mut y = step;
+    while y < h {
+        for x in 0..w {
+            total += f64::from((luma(x, y) - luma(x, y - 1)).unsigned_abs());
+            count += 1;
+        }
+        y += step;
+    }
+    if count == 0 {
+        0.0
+    } else {
+        total / f64::from(count)
+    }
 }
 
 /// Decode an index into a 5-bit Morton (Z-order) `(x, y)` pair: even bits form
 /// `x`, odd bits form `y`. Pure function — the de-tiling primitive.
 #[must_use]
-pub fn morton_5bit(_index: u32) -> (u32, u32) {
-    unimplemented!("RED: morton decode pending")
+pub fn morton_5bit(index: u32) -> (u32, u32) {
+    let mut x = 0;
+    let mut y = 0;
+    for bit in 0..5 {
+        x |= ((index >> (bit * 2)) & 1) << bit;
+        y |= ((index >> (bit * 2 + 1)) & 1) << bit;
+    }
+    (x, y)
 }
 
 #[cfg(test)]
