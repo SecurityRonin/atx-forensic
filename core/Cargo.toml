@@ -1,0 +1,20 @@
+[package]
+name = "atx-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Reader/decoder for Apple ATX (AAPL) texture-image containers — iOS UI image caches (snapshots, posters, avatars, wallpapers). Parses the chunked AAPL container, decodes ASTC (incl. LZFSE-wrapped) payloads to RGBA."
+
+[lib]
+name = "atx_core"
+
+[dependencies]
+lzfse_rust = { workspace = true }
+astc-decode = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

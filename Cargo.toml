@@ -1,0 +1,35 @@
+[workspace]
+members = ["core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+repository = "https://github.com/SecurityRonin/atx-forensic"
+authors = ["Albert Hui <albert@securityronin.com>"]
+
+[workspace.dependencies]
+# Codecs are REUSED, never reinvented (verified fleet-standard third-party):
+#   lzfse_rust — the fleet's LZFSE decoder (apfs-forensic, dmg, hfsplus-forensic
+#   already depend on it; pure-Rust so forbid(unsafe) holds).
+lzfse_rust = "0.2"
+#   astc-decode (wwylele) — software ASTC decoder.
+astc-decode = "0.3"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+correctness = "deny"
+suspicious = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+doc_markdown = { level = "allow", priority = 1 }
+module_name_repetitions = { level = "allow", priority = 1 }
+unnested_or_patterns = { level = "allow", priority = 1 }
+missing_errors_doc = { level = "allow", priority = 1 }
+cast_possible_truncation = { level = "allow", priority = 1 }
