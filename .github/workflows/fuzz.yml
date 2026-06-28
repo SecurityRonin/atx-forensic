@@ -23,4 +23,5 @@ jobs:
         run: |
           DUR=60
           if [ "${{ github.event_name }}" = "schedule" ]; then DUR=900; fi
-          cargo fuzz run parse_decode -- -max_total_time=$DUR -rss_limit_mb=4096
+          # `+nightly` overrides rust-toolchain.toml (1.96.0); cargo-fuzz needs nightly.
+          cargo +nightly fuzz run parse_decode -- -max_total_time=$DUR -rss_limit_mb=4096

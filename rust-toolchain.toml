@@ -1,2 +1,7 @@
 [toolchain]
 channel = "1.96.0"
+# Carry rustfmt/clippy on the pinned toolchain itself: this file overrides the
+# active toolchain everywhere (CI and local), so the components must live here —
+# otherwise `cargo fmt`/`cargo clippy` resolve to a 1.96.0 toolchain that the CI
+# action set up without them. Single source of truth for the dev toolchain.
+components = ["rustfmt", "clippy"]

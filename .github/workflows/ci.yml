@@ -56,7 +56,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@1.80
       - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2.7.8
-      - run: cargo build
+      # `+1.80` overrides rust-toolchain.toml (which pins 1.96.0) so this job
+      # actually verifies the declared MSRV instead of the dev toolchain.
+      - run: cargo +1.80 build
 
   deny:
     name: cargo-deny
