@@ -8,21 +8,32 @@ caches: PosterBoard / runtime **snapshots**, **wallpapers**, **contact posters**
 decodes the ASTC texture payload to RGBA/PNG, so a forensic timeline can recover
 the actual images a device displayed.
 
-> **Status: scaffold.** Container recognition, chunk inventory, and the
-> pixel-format confidence model are implemented and tested. The texture **decode**
-> (LZFSE → ASTC → Morton de-tile) returns `Unimplemented` until it is built out
-> against real `.atx` samples and the iLEAPP reference — see
-> [`HANDOFF.md`](HANDOFF.md). Not yet published to crates.io.
+> **Status: pre-release.** Container parse (8-byte magic, framed chunk walk),
+> `HEAD` metadata, payload framing, the Morton de-tile, and the full texture
+> **decode** pipeline (LZFSE → ASTC 4x4 → de-tile → RGBA) are implemented and
+> tested — clean-room from, and cross-validated against, the iLEAPP reference as
+> an independent oracle. **Not yet pixel-validated against a real device sample +
+> iLEAPP's PNG output** (the remaining boundary — see [`HANDOFF.md`](HANDOFF.md)
+> §5); treat decoded images as unverified on real ASTC content until then. Not
+> yet published to crates.io.
 
 ## What it does today
 
 ```rust
-use atx_core::{is_atx, parse, astc4x4_confidence, FormatConfidence};
+use atx_core::{is_atx, parse, decode, astc4x4_confidence, FormatConfidence};
 
-assert!(is_atx(b"AAPL\x00\x01"));
+assert!(is_atx(b"AAPL\r\n\x1a\nrest")); // full 8-byte AAPL signature
 
-// Inventory the chunks a container carries (heuristic FourCC scan for now).
-let chunks = parse(bytes)?;
+// Parse the container: framed chunk walk + HEAD metadata + payload, with
+// non-fatal anomalies surfaced as warnings (never a silent empty).
+let atx = parse(bytes)?;
+if let Some(head) = &atx.head {
+    println!("{}x{} pixel_format {:?}", head.width, head.height, head.pixel_format);
+}
+
+// Decode the texture to RGBA8 (carries the confirmed-vs-inferred confidence).
+let img = decode(bytes)?;
+assert_eq!(img.rgba.len() as u32, img.width * img.height * 4);
 
 // Report the pixel format honestly — confirmed vs inferred, never a guess.
 assert_eq!(astc4x4_confidence((3, 5)), Some(FormatConfidence::Confirmed));
@@ -32,11 +43,14 @@ assert_eq!(astc4x4_confidence((9, 9)), None); // unknown pair → surface the ra
 
 ## The format (from the source research)
 
-A chunked `AAPL` container — `HEAD` (metadata: dimensions, UUID, pixel-format
+A chunked `AAPL` container (8-byte `AAPL\r\n\x1a\n` signature, then framed
+`[size][tag]` chunks) — `HEAD` (metadata: dimensions, UUID, pixel-format
 discriminator), `FILL`, an `astc`/`ASTC` payload (mostly ASTC 4x4), and `LZFS`
-(LZFSE-wrapped ASTC). The ASTC blocks are macro-tiled in Morton order with an X/Y
-swap, so the decode pipeline is `LZFS` → LZFSE-decompress → ASTC 4x4 → Morton
-de-tile → RGBA. Source: [Decoding Apple ATX Images in iLEAPP (James Habben,
+(LZFSE-wrapped ASTC). A raw `astc`/`ASTC` payload is macro-tiled in 32×32-block
+Morton order (X/Y interpretation chosen by a grid-seam heuristic), so its pipeline
+is ASTC blocks → de-tile → ASTC 4x4 → RGBA. An `LZFS` payload is
+LZFSE-decompressed to an already-*linear* ASTC stream (no de-tile) → ASTC 4x4 →
+RGBA. Source: [Decoding Apple ATX Images in iLEAPP (James Habben,
 2026-06-26)](https://leapps.org/blog-post?post=2026-06-26-decoding-apple-atx-images).
 
 Codecs are reused, not reinvented: [`lzfse_rust`](https://crates.io/crates/lzfse_rust)

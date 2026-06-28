@@ -58,55 +58,73 @@ AAPL (magic)  HEAD  FILL  astc/ASTC  LZFS  END
   - **The new, ours** code = the AAPL container parse, the `HEAD` field layout,
     and the **Morton de-tiling**. That is the whole value-add; keep it tight.
 
-## 4. What's DONE (this scaffold)
+## 4. What's DONE
 
-Compiles; `cargo test` green (5 tests); `cargo clippy --all-targets -- -D
+Compiles; `cargo test` green (14 tests); `cargo clippy --all-targets -- -D
 warnings` clean; Paranoid Gatekeeper lints on (no unwrap/expect, forbid unsafe).
 
-- `MAGIC` (`AAPL`) + `is_atx` + `parse` (validates magic, fails loud with the
-  offending bytes).
-- `chunk_index` — a **heuristic** FourCC scan (locates HEAD/FILL/astc/ASTC/LZFS
-  by tag bytes; framing not yet known).
-- `astc4x4_confidence((u32,u32))` — the **confirmed/inferred** discriminator
-  mapping (the epistemics piece), fully implemented + tested.
-- Data model: `Head`, `ChunkRef`, `FormatConfidence`, `DecodedImage`, `AtxError`.
-- `decode` — honestly returns `Unimplemented` (no fabricated offsets).
+The iLEAPP reference (prerequisite 1 of §5) **has been obtained and read** — the
+byte layout below is now clean-room reimplemented from it, not guessed, and
+cross-validated against it as an independent oracle (§5).
+
+- `MAGIC` — the **8-byte** signature `AAPL\r\n\x1a\n` (the scaffold's 4-byte
+  `AAPL` guess was confirmed wrong by the reference's `AAPL_MAGIC`). `is_atx`
+  gates on all 8 bytes.
+- `parse` — a **framed** chunk walk: from offset 8, each chunk is
+  `[size u32 LE][tag][payload]`. Returns an `Atx { chunks, head, payload,
+  warnings }`. Bad magic fails loud (`NotAtx` + offending bytes); malformed
+  chunks after a valid magic degrade to `warnings` (past-EOF, trailing bytes).
+- `Head` parse — fields at the reference's offsets (width `0x18`, height `0x1C`,
+  depth `0x20`, array `0x28`, mipmaps `0x2C`, uuid `0x3C`, pixel-format
+  `0x4C`/`0x50`; HEAD `>= 0x54` bytes).
+- `Payload` — inner `[declared_size u32][data]`; `LZFS` ⇒ compressed.
+- `decode` — full pipeline. `LZFS`: LZFSE-decompress (`lzfse_rust`) → *linear*
+  ASTC 4x4 → `astc-decode`. Raw `astc`/`ASTC`: 32×32-block **Morton de-tile**
+  (both X/Y orientations, grid-seam tie-break) → `astc-decode`. Crops to HEAD
+  dims; carries `FormatConfidence`. Fail-loud errors surface the offending value
+  (pixel format, sizes).
+- `morton_5bit` + `astc4x4_confidence` — pure functions, fully tested.
 - Deps wired: `lzfse_rust`, `astc-decode`, `thiserror`.
 
-## 5. What's NEXT — and the HARD validation boundary (Doer-Checker)
+**Correction to §2's mental model:** the Morton de-tile applies **only to the raw
+`astc`/`ASTC` path**. An `LZFS` payload decompresses to an already-*linear* ASTC
+stream (padded to the 4×4 block grid) — no macro de-tiling. (Confirmed from the
+reference; the blog's "LZFS → … → Morton" single-pipeline framing was slightly
+off.)
 
-**You cannot finish this from the blog alone.** The blog gives the *shape*, not
-the byte-level framing (chunk header layout, size encoding, `END` framing, `HEAD`
-field offsets). Do NOT fabricate offsets. Two prerequisites, both mandatory:
+## 5. What's NEXT — and the remaining validation boundary (Doer-Checker)
 
-1. **The iLEAPP reference.** Read `leapp_functions/parsers/apple_atx.py` and
-   `scripts/artifacts/apple_atx_images.py` in
-   [abrignoni/iLEAPP](https://github.com/abrignoni/iLEAPP) (**MIT** — confirm the
-   LICENSE, then it is legal to read as a reference and cite; clean-room
-   re-implement in Rust, do not copy verbatim). This is the authoritative byte
-   layout.
-2. **Real `.atx` samples.** Pull genuine files from an iOS file-system extraction
+Prerequisite 1 (the iLEAPP reference) is **done**: `apple_atx.py` and
+`apple_atx_images.py` in [abrignoni/iLEAPP](https://github.com/abrignoni/iLEAPP)
+(LICENSE confirmed **MIT** — legal to read + cite; reimplemented clean-room, not
+copied) gave the authoritative byte layout, now implemented (§4). The framed
+walk, HEAD offsets, payload framing, Morton de-tile, and full decode pipeline are
+built and **cross-validated against that reference as an independent oracle**:
+the same synthetic container bytes feed the Python reference and the Rust parser,
+and HEAD fields, chunk framing, the past-EOF warning, and the de-tile permutation
+(both X/Y orientations, byte-for-byte) all agree. This is tier-2 — the reference
+is a real reverse-engineered implementation, but the *scenarios are synthetic*.
+
+**The remaining boundary is prerequisite 2 — real `.atx` samples + the pixel
+oracle.** What is NOT yet validated: that the end-to-end decode produces the
+*visually correct* image on a real device texture (the blog's "snaps into place").
+The container parse and de-tile permutation are oracle-confirmed; the ASTC pixel
+math is `astc-decode`'s (its own validation); but the full chain on genuine
+macro-tiled ASTC has not been diffed against iLEAPP's PNG output. To close it:
+
+1. **Real `.atx` samples.** Pull genuine files from an iOS file-system extraction
    (PosterBoard/SpringBoard snapshot paths, avatar/Animoji caches). Per the fleet
    test-data standard: large/real samples gitignored + documented in
    `tests/data/README.md`, validated env-gated.
+2. **Pixel oracle diff (env-gated test).** Decode a real `.atx`, render PNG, and
+   **diff against iLEAPP's decoded PNG for the same file**. Reconcile every
+   mismatch — especially the grid-seam orientation pick, which is a heuristic, not
+   a format flag. A self-encoded round-trip proves nothing here.
 
-Then build out (strict TDD — RED test then GREEN, separate commits):
-
-- **Framed chunk walk** — replace the heuristic `chunk_index` with a real walk of
-  the chunk headers (FourCC + size). Confirm the `END` framing.
-- **`HEAD` parse** — the field byte offsets → populate `Head` (width/height/…/
-  UUID/discriminator).
-- **Decode pipeline** — for the payload chunk:
-  `LZFS` → `lzfse_rust` decompress → ASTC 4x4 via `astc-decode` →
-  **Morton block de-tile (with X/Y swap)** → RGBA8 → (optional) PNG. Carry the
-  `FormatConfidence` through to `DecodedImage`.
-- **Morton de-tile** is the subtle bit — it is *macro-tiling* of ASTC *blocks*,
-  and the X/Y local interpretation is swapped. Expect to iterate against a real
-  sample until the image "snaps into place" (the blog's words).
-
-**Validation:** decode a real `.atx`, render PNG, and **diff against iLEAPP's
-decoded PNG for the same file** (the oracle). Reconcile every mismatch. A
-self-encoded round-trip proves nothing here.
+Likely points needing a real sample to confirm: the grid-seam tie-break choosing
+the right orientation on real content; the `astc-decode` (Rust) vs PIL/`astc_decomp`
+(Python) decoders agreeing pixel-for-pixel; and any HEAD field whose meaning the
+synthetic fixture got nominally right but a real device populates differently.
 
 ## 6. Epistemics (mandatory — same discipline as the issen report work)
 
