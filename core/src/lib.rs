@@ -754,6 +754,39 @@ mod tests {
     }
 
     #[test]
+    fn detile_permutation_matches_ileapp_oracle() {
+        // Oracle: iLEAPP `_macro_tiled_payload` on a single 128x128 macro tile
+        // (32x32 blocks) where source block i carries byte value (i & 0xFF). The
+        // value landing at linear block L is the cross-checked permutation. These
+        // golden arrays were produced by the reference (tier-2 independent oracle),
+        // not chosen by us. See tests/oracle in the build-out notes.
+        let mut payload = Vec::new();
+        for i in 0..32 * 32u32 {
+            payload.extend_from_slice(&[(i & 0xFF) as u8; 16]);
+        }
+        let cases: [(bool, [u8; 16]); 2] = [
+            (
+                false,
+                [0, 1, 4, 5, 16, 17, 20, 21, 64, 65, 68, 69, 80, 81, 84, 85],
+            ),
+            (
+                true,
+                [
+                    0, 2, 8, 10, 32, 34, 40, 42, 128, 130, 136, 138, 160, 162, 168, 170,
+                ],
+            ),
+        ];
+        for (swap, expected) in cases {
+            let linear = detile_blocks(&payload, 32, 32, swap);
+            let got: Vec<u8> = (0..16).map(|l| linear[l * ASTC_BLOCK_BYTES]).collect();
+            assert_eq!(
+                got, expected,
+                "swap={swap} de-tile diverges from iLEAPP oracle"
+            );
+        }
+    }
+
+    #[test]
     fn decode_rejects_non_atx() {
         assert!(matches!(decode(b"nope"), Err(AtxError::NotAtx { .. })));
     }
