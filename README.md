@@ -15,11 +15,10 @@ PosterBoard snapshots, wallpapers, contact posters, and Animoji avatars — and
 decode their ASTC payloads to RGBA, in one `forbid(unsafe)` Rust crate. ATX files
 are *what was on screen*; `atx-core` turns the container back into the picture.**
 
-> **Status: decoder built, pixel-validation pending.** The container parse, HEAD
-> layout, payload framing, and Morton de-tile are implemented and cross-checked
-> against the iLEAPP reference as an oracle (tier-2). The end-to-end image decode
-> is **not yet diffed pixel-for-pixel against a real device texture** — see
-> [Trust but verify](#trust-but-verify). Decoded pixels are wired, not yet proven.
+> **Status: validated on real device textures (tier-1).** Decodes **108 real
+> `.atx` files** from a genuine iPhone 11 / iOS 17.3 extraction, matching the
+> independent iLEAPP reference to **within one LSB per channel on every file**,
+> across both payload paths — see [Trust but verify](#trust-but-verify).
 
 ## Decode an ATX texture
 
@@ -85,16 +84,21 @@ No `unsafe` (`unsafe_code = "forbid"`), no C bindings, paranoid lints (no
 errors with the offending bytes; malformed chunks after a valid magic degrade to
 `Atx::warnings`, never a silent empty result.
 
-Validation is honestly tiered (Doer-Checker):
+Validation is honestly tiered (Doer-Checker), and now **tier-1**:
 
-- **Confirmed (tier-2):** the container parse, HEAD offsets, payload framing, and
-  the Morton de-tile permutation are cross-checked byte-for-byte against the
-  iLEAPP reference as an independent oracle — but on *synthetic* containers built
-  to the documented layout.
-- **Not yet confirmed:** that the end-to-end decode produces the *visually
-  correct* image on a real device texture. Closing this needs genuine `.atx`
-  samples from an iOS extraction plus a PNG diff against iLEAPP's output. Until
-  then, do not present a decoded image as oracle-confirmed.
+- **Real artifact + independent oracle.** 108 real `.atx` from a public iPhone 11
+  / iOS 17.3 full-file-system image (Josh Hickman's research device) decode to RGBA
+  that matches the iLEAPP reference (a different author *and* a different ASTC
+  decoder) to **≤1 LSB per channel on all 108** — including the 48 raw
+  macro-tiled posters/wallpapers where the Morton de-tile orientation matters. The
+  ±1 is rounding between two independent decoders, not a layout error. Full
+  methodology, corpus provenance, and per-path results in
+  [`docs/validation.md`](docs/validation.md).
+- **Scope of the claim.** The container parse, HEAD layout, payload framing, LZFSE
+  path, de-tile/orientation, crop, and format classification are oracle-confirmed
+  on this corpus (one device, one OS version, all ASTC 4x4). The absolute ASTC
+  pixel math is each decoder's own concern; ±1-LSB agreement between two unrelated
+  decoders corroborates it.
 
 **Epistemics.** Report the pixel format as *confirmed* vs *inferred* — never an
 inference as fact. A file's path (`PosterSnapshots`, `PRBPosterExtensionDataStore`,

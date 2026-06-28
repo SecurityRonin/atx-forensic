@@ -105,12 +105,14 @@ and HEAD fields, chunk framing, the past-EOF warning, and the de-tile permutatio
 (both X/Y orientations, byte-for-byte) all agree. This is tier-2 — the reference
 is a real reverse-engineered implementation, but the *scenarios are synthetic*.
 
-**The remaining boundary is prerequisite 2 — real `.atx` samples + the pixel
-oracle.** What is NOT yet validated: that the end-to-end decode produces the
-*visually correct* image on a real device texture (the blog's "snaps into place").
-The container parse and de-tile permutation are oracle-confirmed; the ASTC pixel
-math is `astc-decode`'s (its own validation); but the full chain on genuine
-macro-tiled ASTC has not been diffed against iLEAPP's PNG output. To close it:
+**Prerequisite 2 — real `.atx` samples + the pixel oracle — is now DONE (tier-1).**
+108 real `.atx` from the public iPhone 11 / iOS 17.3 image (issen's
+`josh-hickman-ios17-biome-segb` corpus) decode to RGBA matching the iLEAPP oracle
+(different author *and* different ASTC decoder) to within 1 LSB/channel on every
+file — including all 48 raw macro-tiled posters/wallpapers, so the de-tile
+orientation is confirmed on real content. Full results: `docs/validation.md`;
+harness: `tools/atx_oracle_diff.py`; regression backstop: the env-gated
+`core/tests/corpus.rs` (`ATX_CORPUS=…`). The original closure plan was:
 
 1. **Real `.atx` samples.** Pull genuine files from an iOS file-system extraction
    (PosterBoard/SpringBoard snapshot paths, avatar/Animoji caches). Per the fleet

@@ -38,15 +38,16 @@
 //! `astc-decode`. The new value-add is the AAPL container parse, the HEAD field
 //! layout, and the Morton de-tiling.
 //!
-//! ## Validation status (Doer-Checker)
+//! ## Validation status (Doer-Checker) — tier-1
 //!
-//! The container parse and the Morton math are validated here against fixtures
-//! built to the documented byte layout and against hand-derived values (tier-2).
-//! The **end-to-end image decode is NOT yet pixel-validated against a real device
-//! sample + the iLEAPP oracle** (PNG diff) — that remains the build-out boundary
-//! recorded in HANDOFF.md §5. The decode wires validated codecs and the
-//! clean-room framing/de-tile, but visual correctness on real ASTC textures is
-//! unconfirmed. Do not present a decoded image as oracle-confirmed.
+//! In-crate unit tests cover the container parse and Morton math against the
+//! documented byte layout. Beyond that, the end-to-end decode is **tier-1
+//! validated on real device textures**: 108 real `.atx` files from a public
+//! iPhone 11 / iOS 17.3 full-file-system image decode to RGBA matching the
+//! independent iLEAPP reference (a different author *and* a different ASTC
+//! decoder) to within one LSB per channel on every file, across both the
+//! LZFSE-compressed and raw macro-tiled paths. See `docs/validation.md` for the
+//! corpus, oracle, and per-path results.
 //!
 //! **Epistemics**: report the pixel format as *confirmed* vs *inferred*; never
 //! claim a file is the *active* wallpaper just because of its path. State what the
@@ -370,9 +371,8 @@ pub struct DecodedImage {
 
 /// Decode the texture payload to RGBA8.
 ///
-/// NOTE (Doer-Checker): this wires validated codecs (`lzfse_rust`, `astc-decode`)
-/// and the clean-room framing/de-tile, but the end-to-end result is **not yet
-/// pixel-validated against a real device sample + the iLEAPP oracle** (HANDOFF §5).
+/// Tier-1 validated: output matches the independent iLEAPP oracle to within one
+/// LSB per channel on 108 real iOS 17.3 device textures (see `docs/validation.md`).
 pub fn decode(bytes: &[u8]) -> Result<DecodedImage, AtxError> {
     let atx = parse(bytes)?;
     let head = atx.head.ok_or(AtxError::NoHead)?;
