@@ -151,7 +151,10 @@ write a test asserting the parsed `HEAD`/decoded pixels for that sample; (3) GRE
 GREEN. Reuse `lzfse_rust`/`astc-decode` for all codec math; the only new code is
 container parse + Morton de-tile.
 
-Before publish (fleet standard): `deny.toml`, fuzz target (one per parsed
-structure, invariant = no panic), `README.md` (SecurityRonin standard), MkDocs
-`docs/`, `LICENSE` (Apache-2.0), tag-driven `release.yml`, 100% line-coverage
-gate. Settle the crate name within 72h of first publish.
+Before publish (fleet standard). **Done:** `deny.toml`, `README.md` (SecurityRonin
+standard), MkDocs `docs/` (+ `privacy.md`/`terms.md`), `LICENSE` (Apache-2.0),
+`SECURITY.md`, `.pre-commit-config.yaml`, `renovate.json`, CI (`ci.yml`: fmt,
+clippy, test matrix, MSRV 1.80, cargo-deny, docs). **Still TODO:** fuzz target
+(one per parsed structure, invariant = no panic), tag-driven `release.yml`, 100%
+line-coverage gate — all gated on closing the §5 pixel-validation boundary first.
+Settle the crate name within 72h of first publish.
