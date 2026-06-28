@@ -78,7 +78,7 @@ For each `.atx`, decode with both engines to RGBA8 and compare:
 3. **Compare** — equal dimensions, then per-byte difference: count differing
    channels, max absolute difference, percentage differing.
 
-Driver: [`tools/atx_oracle_diff.py`](../tools/atx_oracle_diff.py).
+Driver: [`tools/atx_oracle_diff.py`](https://github.com/SecurityRonin/atx-forensic/blob/main/tools/atx_oracle_diff.py).
 
 ## Results
 

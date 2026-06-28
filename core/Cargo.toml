@@ -1,11 +1,12 @@
 [package]
 name = "atx-core"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme.workspace = true
 description = "Reader/decoder for Apple ATX (AAPL) texture-image containers — iOS UI image caches (snapshots, posters, avatars, wallpapers). Parses the chunked AAPL container, decodes ASTC (incl. LZFSE-wrapped) payloads to RGBA."
 
 [lib]

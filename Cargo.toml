@@ -8,6 +8,7 @@ rust-version = "1.80"
 license = "Apache-2.0"
 repository = "https://github.com/SecurityRonin/atx-forensic"
 authors = ["Albert Hui <albert@securityronin.com>"]
+readme = "README.md"
 
 [workspace.dependencies]
 # Codecs are REUSED, never reinvented (verified fleet-standard third-party):

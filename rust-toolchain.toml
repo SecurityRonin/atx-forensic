@@ -4,4 +4,4 @@ channel = "1.96.0"
 # active toolchain everywhere (CI and local), so the components must live here —
 # otherwise `cargo fmt`/`cargo clippy` resolve to a 1.96.0 toolchain that the CI
 # action set up without them. Single source of truth for the dev toolchain.
-components = ["rustfmt", "clippy"]
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

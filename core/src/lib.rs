@@ -560,7 +560,7 @@ fn grid_seam_score(rgba: &[u8], width: u32, height: u32) -> f64 {
             Some(p) => {
                 (i32::from(p[0]) * 299 + i32::from(p[1]) * 587 + i32::from(p[2]) * 114) / 1000
             }
-            None => 0,
+            None => 0, // cov:unreachable: luma is called with x<w,y<h over a w*h*4 buffer
         }
     };
     let step = MACRO_TILE_PX as usize;
@@ -872,5 +872,54 @@ mod tests {
         assert_eq!((img.width, img.height), (4, 4));
         assert_eq!(img.rgba.len(), 4 * 4 * 4);
         assert_eq!(img.confidence, FormatConfidence::Inferred);
+    }
+
+    #[test]
+    fn trailing_bytes_after_last_chunk_warn() {
+        let mut buf = container(&[(fourcc::HEAD, head_payload(4, 4, (3, 5)))]);
+        buf.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // < 8 trailing bytes: walk exits with offset < len
+        let atx = parse(&buf).unwrap();
+        assert!(atx.warnings.iter().any(|w| w.contains("trailing byte")));
+    }
+
+    #[test]
+    fn payload_chunk_too_small_for_inner_size_warns() {
+        // An LZFS chunk whose whole payload is < 4 bytes cannot hold the inner size.
+        let buf = container(&[(fourcc::LZFS, vec![0u8, 1])]);
+        let atx = parse(&buf).unwrap();
+        assert!(atx.payload.is_none());
+        assert!(atx
+            .warnings
+            .iter()
+            .any(|w| w.contains("too small to include an inner size")));
+    }
+
+    #[test]
+    fn macro_tiled_payload_too_small_errors() {
+        // A 4x4 image pads to a 128x128 macro tile (16384 bytes); a tiny payload
+        // must fail loud, not read out of bounds.
+        let buf = container(&[
+            (fourcc::HEAD, head_payload(4, 4, (1, 1))),
+            (fourcc::ASTC_LOWER, payload_body(0, &[0u8; 100])),
+        ]);
+        assert!(matches!(
+            decode(&buf),
+            Err(AtxError::PayloadTooSmall { .. })
+        ));
+    }
+
+    #[test]
+    fn macro_tiled_large_image_exercises_seam_score() {
+        // 200x200 pads to a 256x256 macro region (64x64 = 4096 ASTC blocks). The
+        // 128-px seam loops in grid_seam_score only execute when each dimension
+        // exceeds one macro tile, so this covers the orientation tie-break path.
+        let blocks = 64 * 64;
+        let buf = container(&[
+            (fourcc::HEAD, head_payload(200, 200, (3, 5))),
+            (fourcc::ASTC_UPPER, payload_body(0, &vec![0u8; blocks * 16])),
+        ]);
+        let img = decode(&buf).unwrap();
+        assert_eq!((img.width, img.height), (200, 200));
+        assert_eq!(img.rgba.len(), 200 * 200 * 4);
     }
 }
