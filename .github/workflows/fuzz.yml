@@ -1,0 +1,26 @@
+name: Fuzz
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1" # weekly deeper run
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: Fuzz parse_decode (no-panic invariant)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2.7.8
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz (60s on PR, 15m on schedule)
+        run: |
+          DUR=60
+          if [ "${{ github.event_name }}" = "schedule" ]; then DUR=900; fi
+          cargo fuzz run parse_decode -- -max_total_time=$DUR -rss_limit_mb=4096

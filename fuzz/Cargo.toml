@@ -1,0 +1,27 @@
+# cargo-fuzz harness for atx-core. Its own workspace so it does not inherit the
+# parent's `unsafe_code = "forbid"` lint (the libfuzzer-sys entry point is
+# `#[no_main]` + generated unsafe glue). Not published; not part of atx-core's
+# package (`cargo publish -p atx-core` ships only `core/`).
+[package]
+name = "atx-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.atx-core]
+path = "../core"
+
+[[bin]]
+name = "parse_decode"
+path = "fuzz_targets/parse_decode.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

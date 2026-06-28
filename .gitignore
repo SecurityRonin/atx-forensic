@@ -1,2 +1,9 @@
 /target
 Cargo.lock
+
+# cargo-fuzz: harness (Cargo.toml, fuzz_targets) is committed; build output, the
+# crash artifacts, and the seed corpus (real device .atx / Apple assets) are not.
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/Cargo.lock

@@ -66,6 +66,11 @@ const ASTC_BLOCK_BYTES: usize = 16;
 const ASTC_BLOCK_WIDTH: u32 = 4;
 /// ASTC 4x4 block height in pixels.
 const ASTC_BLOCK_HEIGHT: u32 = 4;
+/// Upper bound on declared geometry (width x height). A crafted HEAD can carry
+/// arbitrary `u32` dimensions; reject implausibly large ones loudly before any
+/// padding/byte-count math so the decode cannot overflow or attempt a wild
+/// allocation. Mirrors the iLEAPP reference's `MAX_IMAGE_PIXELS` guard.
+const MAX_IMAGE_PIXELS: u64 = 100_000_000;
 /// Macro-tile edge in ASTC blocks (the de-tiling tile is 32x32 blocks).
 const MACRO_BLOCKS: u32 = 32;
 /// Macro-tile edge in pixels (32 blocks x 4 px = 128) — also the grid-seam step.
@@ -378,7 +383,10 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedImage, AtxError> {
     let head = atx.head.ok_or(AtxError::NoHead)?;
     let payload = atx.payload.ok_or(AtxError::NoPayload)?;
 
-    if head.width == 0 || head.height == 0 {
+    if head.width == 0
+        || head.height == 0
+        || u64::from(head.width) * u64::from(head.height) > MAX_IMAGE_PIXELS
+    {
         return Err(AtxError::InvalidDimensions {
             width: head.width,
             height: head.height,
@@ -409,14 +417,19 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedImage, AtxError> {
 
 /// Round `value` up to the next multiple of `multiple`.
 fn round_up(value: u32, multiple: u32) -> u32 {
-    value.div_ceil(multiple) * multiple
+    // Saturating so a pathological `value` can never overflow-panic; callers gate
+    // real geometry on `MAX_IMAGE_PIXELS`, and a saturated size is caught by the
+    // downstream payload-length check rather than aborting.
+    value.div_ceil(multiple).saturating_mul(multiple)
 }
 
 /// Bytes a padded `width` x `height` ASTC 4x4 texture occupies.
 fn astc_byte_count(width: u32, height: u32) -> usize {
     let blocks_w = round_up(width, ASTC_BLOCK_WIDTH) / ASTC_BLOCK_WIDTH;
     let blocks_h = round_up(height, ASTC_BLOCK_HEIGHT) / ASTC_BLOCK_HEIGHT;
-    blocks_w as usize * blocks_h as usize * ASTC_BLOCK_BYTES
+    (blocks_w as usize)
+        .saturating_mul(blocks_h as usize)
+        .saturating_mul(ASTC_BLOCK_BYTES)
 }
 
 /// `LZFS` path: LZFSE-decompress to a *linear* ASTC 4x4 stream, decode, crop.
@@ -724,6 +737,24 @@ mod tests {
             &buf[payload.data_offset..payload.data_offset + payload.data_len],
             &data[..]
         );
+    }
+
+    #[test]
+    fn oversized_dimensions_error_not_overflow_panic() {
+        // A crafted HEAD carries arbitrary u32 dimensions. cargo-fuzz found that
+        // u32::MAX dims overflowed the padding math (`round_up`); decode must fail
+        // loud with InvalidDimensions, never panic. Regression for the
+        // parse_decode fuzz crash.
+        for (w, h) in [(u32::MAX, u32::MAX), (u32::MAX, 1), (100_000, 100_000)] {
+            let buf = container(&[
+                (fourcc::HEAD, head_payload(w, h, (3, 5))),
+                (fourcc::ASTC_LOWER, payload_body(64, &[0u8; 64])),
+            ]);
+            assert!(
+                matches!(decode(&buf), Err(AtxError::InvalidDimensions { .. })),
+                "{w}x{h} must error loudly, not panic/overflow"
+            );
+        }
     }
 
     #[test]
