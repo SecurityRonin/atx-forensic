@@ -23,10 +23,6 @@ audit-as-crates-io = false
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.atx-core]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.lzfse_rust]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
