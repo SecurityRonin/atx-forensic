@@ -32,5 +32,10 @@ expect_used = "deny"
 doc_markdown = { level = "allow", priority = 1 }
 module_name_repetitions = { level = "allow", priority = 1 }
 unnested_or_patterns = { level = "allow", priority = 1 }
+must_use_candidate = { level = "allow", priority = 1 }
 missing_errors_doc = { level = "allow", priority = 1 }
+missing_panics_doc = { level = "allow", priority = 1 }
 cast_possible_truncation = { level = "allow", priority = 1 }
+cast_possible_wrap = { level = "allow", priority = 1 }
+cast_sign_loss = { level = "allow", priority = 1 }
+cast_precision_loss = { level = "allow", priority = 1 }
