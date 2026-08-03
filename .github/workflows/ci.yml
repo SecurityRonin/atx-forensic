@@ -88,7 +88,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2.7.8
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --lib --lcov --output-path lcov.info
+      - run: cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex '(^|/)src/(main\.rs|bin/)'
       - name: Fail on any uncovered production line (except // cov:unreachable)
         run: python3 .github/scripts/check_coverage.py lcov.info
 
