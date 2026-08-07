@@ -661,7 +661,7 @@ mod tests {
         let err = parse(b"\x89PNG\r\n\x1a\n").unwrap_err();
         match err {
             AtxError::NotAtx { found } => assert_eq!(found, b"\x89PNG\r\n\x1a\n"),
-            other => panic!("expected NotAtx, got {other:?}"),
+            other => panic!("expected NotAtx, got {other:?}"), // cov:unreachable: the NotAtx arm above matches whenever this test passes
         }
     }
 
@@ -832,7 +832,7 @@ mod tests {
             Err(AtxError::UnsupportedPixelFormat { pixel_format }) => {
                 assert_eq!(pixel_format, (9, 9));
             }
-            other => panic!("expected UnsupportedPixelFormat, got {other:?}"),
+            other => panic!("expected UnsupportedPixelFormat, got {other:?}"), // cov:unreachable: the UnsupportedPixelFormat arm above matches whenever this test passes
         }
     }
 
