@@ -24,4 +24,4 @@ jobs:
   # an input would misrepresent it as a live decision. MSRV is read from
   # rust-version (1.80), which is what the old `msrv` job pinned by hand.
   ci:
-    uses: SecurityRonin/fleet-ci/.github/workflows/rust-ci.yml@f9802dca64a95eb881fd05dd3f4f16e53b97f2b3
+    uses: SecurityRonin/fleet-ci/.github/workflows/rust-ci.yml@9234e1fa9f85b14a8d6fddc7a8f7378f7e30b183
