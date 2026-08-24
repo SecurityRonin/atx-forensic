@@ -291,3 +291,67 @@ pub fn analyze_parsed(atx: &Atx, bytes: &[u8]) -> Vec<AtxAnomaly> {
 
     out
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod metadata_tests {
+    use super::*;
+
+    fn all_kinds() -> [AtxAnomalyKind; 3] {
+        [
+            AtxAnomalyKind::ChunkOverrunsEof {
+                tag: *b"HEAD",
+                offset: 8,
+                declared_size: 999,
+                bytes_available: 4,
+            },
+            AtxAnomalyKind::PayloadSmallerThanGeometry {
+                width: 64,
+                height: 64,
+                expected_bytes: 4096,
+                actual_bytes: 100,
+            },
+            AtxAnomalyKind::UnrecognizedPixelFormat {
+                discriminator: (7, 9),
+            },
+        ]
+    }
+
+    #[test]
+    fn every_anomaly_variant_exposes_metadata() {
+        for kind in all_kinds() {
+            // Direct accessors — every match arm of severity/category/code/note.
+            let _ = kind.severity();
+            let _ = kind.category();
+            assert!(!kind.code().is_empty());
+            assert!(!kind.note().is_empty());
+
+            // The `Observation` impl delegates; exercise each method through it.
+            let obs = AtxAnomaly::new(kind.clone());
+            assert!(Observation::severity(&obs).is_some());
+            assert_eq!(Observation::code(&obs), kind.code());
+            assert_eq!(Observation::note(&obs), kind.note());
+            let _ = Observation::category(&obs);
+        }
+    }
+
+    #[test]
+    fn a_non_graphic_chunk_tag_renders_as_hex() {
+        // tag_display's non-ASCII branch: a tag with non-printable bytes must be
+        // shown verbatim as hex, never lost to a lossy UTF-8 decode.
+        let kind = AtxAnomalyKind::ChunkOverrunsEof {
+            tag: [0x00, 0x01, 0xff, 0x7f],
+            offset: 0,
+            declared_size: 10,
+            bytes_available: 2,
+        };
+        let note = kind.note();
+        assert!(note.contains("ff"), "a non-graphic tag must render as hex");
+    }
+
+    #[test]
+    fn analyze_returns_empty_for_non_atx_bytes() {
+        // The early return when the buffer is not an ATX container at all.
+        assert!(analyze(&[0u8, 1, 2, 3]).is_empty());
+    }
+}

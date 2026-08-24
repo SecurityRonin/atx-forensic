@@ -1,6 +1,27 @@
 
 # cargo-vet imports lock
 
+[[publisher.forensicnomicon]]
+version = "1.11.1"
+when = "2026-08-08"
+user-id = 347968
+user-login = "h4x0r"
+user-name = "Albert Hui"
+
+[[publisher.forensicnomicon-core]]
+version = "1.5.1"
+when = "2026-08-05"
+user-id = 347968
+user-login = "h4x0r"
+user-name = "Albert Hui"
+
+[[publisher.forensicnomicon-data]]
+version = "1.4.0"
+when = "2026-08-05"
+user-id = 347968
+user-login = "h4x0r"
+user-name = "Albert Hui"
+
 [audits.bytecode-alliance.audits]
 
 [audits.embark.audits]
