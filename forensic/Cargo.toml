@@ -1,0 +1,22 @@
+[package]
+name = "atx-forensic"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+description = "Forensic analyzer for Apple ATX (AAPL) texture containers — structural-integrity findings (chunk truncation past EOF, texture payload smaller than the declared HEAD geometry, unrecognized pixel-format discriminator) emitted as forensicnomicon report observations over the atx-core reader. Re-exports the full reader surface."
+keywords = ["forensics", "ios", "atx", "dfir", "apple"]
+categories = ["parser-implementations"]
+
+[lib]
+name = "atx_forensic"
+
+[dependencies]
+atx-core = { workspace = true }
+forensicnomicon = { workspace = true }
+
+[lints]
+workspace = true
